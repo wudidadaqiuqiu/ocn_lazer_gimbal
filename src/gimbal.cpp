@@ -1,9 +1,8 @@
 #include "rclcpp/rclcpp.hpp"
-// #include "connector/include/ connector.hpp"
 #include "connector/connector.hpp"
 #include "common/protocol/serialized_protocol.hpp"
-#include "robot_msg/msg/imu_raw.hpp"
-#include "robot_msg/msg/imu_raw.h"
+#include "robot_msg/msg/imu_euler.h"
+#include "robot_msg/msg/imu_euler.hpp"
 
 using connector::Connector;
 using connector::ConnectorType;
@@ -18,19 +17,7 @@ using connector_common::ProtocolConfig;
 using connector_common::CRC16Config;
 using connector_common::protocol_type_e;
 
-using robot_msg::msg::ImuRaw;
-
-
-inline void print_array(const uint8_t* arr, size_t length) {
-    std::cout << std::hex;
-    for (size_t i = 0; i < length; ++i) {
-        std::cout << "0x" << static_cast<int>(arr[i]) << " ";
-    }
-
-    std::cout << std::dec;
-    if (length != 0 && arr[length - 1] == 0x7e)
-        std::cout << std::endl;
-}
+using robot_msg::msg::ImuEuler;
 
 static constexpr uint8_t PEER_ID = 0x01;
 
@@ -39,9 +26,9 @@ public:
     TtyNode() 
         : Node("test_tty"), 
         connector(), crn(connector), cs(connector) {
-        connector.con_open("/dev/ttyUSB0", BaudRate::BAUD_1M);
+        connector.con_open("/dev/ttyACM0", BaudRate::BAUD_1M);
         std::cout << "open tty" << std::endl;
-        publisher_ = this->create_publisher<ImuRaw>("/imu_raw", 10);
+        publisher_ = this->create_publisher<ImuEuler>("/imu_euler", 10);
         std::map<uint8_t, std::function<void(uint8_t, const uint8_t*, uint16_t)>> 
             update_func_map;
         std::map<uint8_t, std::function<bool(uint8_t)>> check_id_func_map;
@@ -51,16 +38,12 @@ public:
             // std::cout << "length: " << length << std::endl;
             if (length > sizeof(imu_data)) return;
             memcpy(&imu_data, data, length);
-            imu_raw_data.accel_x = imu_data.accel_x;
-            imu_raw_data.accel_y = imu_data.accel_y;
-            imu_raw_data.accel_z = imu_data.accel_z;
-            imu_raw_data.gyro_x = imu_data.gyro_x;
-            imu_raw_data.gyro_y = imu_data.gyro_y;
-            imu_raw_data.gyro_z = imu_data.gyro_z;
-            imu_raw_data.temperature = imu_data.temperature;
+            imu_msg.roll = imu_data.roll;
+            imu_msg.pitch = imu_data.pitch;
+            imu_msg.yaw = imu_data.yaw;
 
             // 1000Hz
-            publisher_->publish(imu_raw_data);
+            publisher_->publish(imu_msg);
         };
         unpacker.change_map(update_func_map, check_id_func_map);
         crn.register_callback([&](const TtyFrame::MSGT& frame) -> void {
@@ -79,16 +62,14 @@ public:
     }
 
 private:
-    robot_msg__msg__ImuRaw imu_data;
-    ImuRaw imu_raw_data;
+    robot_msg__msg__ImuEuler imu_data;
+    ImuEuler imu_msg;
     Connector<ConnectorType::TTY> connector;
     ConnectorSingleRecvNode<ConnectorType::TTY, TtyFrame> crn;
     ConnectorSendNode<ConnectorType::TTY, TtyFrame> cs;
     Unpacker<ProtocolConfig<CRC16Config<0xFFFF, 0x1021>, 
         protocol_type_e::protocol0>> unpacker;
-    // rclcpp::Subscription<MotorRef>::SharedPtr subscription_;
-    // rclcpp::Subscription<PidParamSet>::SharedPtr subscription_controller_param;
-    rclcpp::Publisher<ImuRaw>::SharedPtr publisher_;
+    rclcpp::Publisher<ImuEuler>::SharedPtr publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 
