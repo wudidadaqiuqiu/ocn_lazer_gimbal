@@ -1,6 +1,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "connector/connector.hpp"
 #include "common/protocol/serialized_protocol.hpp"
+#include "motor/motor.hpp"
+#include "depend_on_ros12/motor_node/motor_node.hpp"
 #include "robot_msg/msg/imu_euler.h"
 #include "robot_msg/msg/imu_euler.hpp"
 
@@ -17,6 +19,9 @@ using connector_common::ProtocolConfig;
 using connector_common::CRC16Config;
 using connector_common::protocol_type_e;
 
+using motor_node::MotorNode;
+using motor_node::MotorType;
+
 using robot_msg::msg::ImuEuler;
 
 static constexpr uint8_t PEER_ID = 0x01;
@@ -25,7 +30,11 @@ class TtyNode : public rclcpp::Node {
 public:
     TtyNode() 
         : Node("test_tty"), 
-        connector(), crn(connector), cs(connector) {
+        connector(), crn(connector), cs(connector),
+        can0_connector("can0"),
+        can1_connector("can1"),
+        can0_recv_node(can0_connector),
+        can1_recv_node(can1_connector) {
         connector.con_open("/dev/ttyACM0", BaudRate::BAUD_1M);
         std::cout << "open tty" << std::endl;
         publisher_ = this->create_publisher<ImuEuler>("/imu_euler", 10);
@@ -59,6 +68,24 @@ public:
             []() -> void {
             }
         );
+
+        pitch = create_6020("pitch", can0_recv_node,1);
+        yaw = create_6020("yaw", can1_recv_node, 3);
+    }
+
+    MotorNode<MotorType::DJI_6020>::SharedPtr create_6020(const std::string& name, 
+        ConnectorSingleRecvNode<ConnectorType::CAN, CanFrame>& ccn, motor::MotorId id) {
+        rclcpp::NodeOptions options;
+        using Motor6020 = MotorNode<MotorType::DJI_6020>;
+        options.use_intra_process_comms(true);  // 启用进程内通信
+        // LOG_INFO(1, "name: %s, id: %d", std::to_string(id).c_str(), id);
+        Motor6020::Config config = {
+            name,
+            {ccn, id},
+            10, options
+        };
+        Motor6020::SharedPtr mn = std::make_shared<Motor6020>(config);
+        return mn;
     }
 
 private:
@@ -71,6 +98,16 @@ private:
         protocol_type_e::protocol0>> unpacker;
     rclcpp::Publisher<ImuEuler>::SharedPtr publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
+
+    Connector<ConnectorType::CAN> can0_connector;
+    Connector<ConnectorType::CAN> can1_connector;
+    
+    ConnectorSingleRecvNode<ConnectorType::CAN, CanFrame> can0_recv_node;
+    ConnectorSingleRecvNode<ConnectorType::CAN, CanFrame> can1_recv_node;
+    
+    MotorNode<MotorType::DJI_6020>::SharedPtr pitch;
+    MotorNode<MotorType::DJI_6020>::SharedPtr yaw;
+    
 };
 
 int main(int argc, char **argv) {
