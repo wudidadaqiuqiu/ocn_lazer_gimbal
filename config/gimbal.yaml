@@ -1,0 +1,11 @@
+/gimbal:
+  ros__parameters:
+    can_send: true
+    pitch:
+      kd: 0.0
+      kp: 0.01
+      outmax: 2.0
+    yaw:
+      kd: 0.0
+      kp: 0.0
+      outmax: 2.0
