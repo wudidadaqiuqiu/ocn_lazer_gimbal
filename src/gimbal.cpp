@@ -47,6 +47,8 @@ public:
         can0_recv_node(can0_connector),
         can1_recv_node(can1_connector) {
         declare_params();
+        pitch = create_6020("pitch", can0_recv_node,1);
+        yaw = create_6020("yaw", can1_recv_node, 3);
         connector.con_open("/dev/ttyACM0", BaudRate::BAUD_1M);
         std::cout << "open tty" << std::endl;
         publisher_ = this->create_publisher<ImuEuler>("/imu_euler", 10);
@@ -84,22 +86,8 @@ public:
         timer_ = this->create_wall_timer(
             std::chrono::milliseconds(1),
             [this]() -> void {
-                // 不能在回调中执行，会Segmentation fault 不知道为什么
-                CanFrame::MSGT id_pack;
-                id_pack.data.resize(8);
-                id_pack.id = pitch->get_motor().set_send_buf(pitch_controller.get().out, id_pack.data);
-                if (can_send)
-                    pitch->get_motor().get_send_node().send(id_pack);
-                
-                id_pack.data.resize(8);
-                id_pack.id = yaw->get_motor().set_send_buf(yaw_controller.get().out, id_pack.data);
-                if (can_send)
-                    yaw->get_motor().get_send_node().send(id_pack);
             }
         );
-
-        pitch = create_6020("pitch", can0_recv_node,1);
-        yaw = create_6020("yaw", can1_recv_node, 3);
     }
 
     auto create_6020(const std::string& name, 
@@ -133,7 +121,19 @@ public:
         yaw_controller.get().ref(1) = 0;
 
         pitch_controller.get().update();
-        yaw_controller.get().update();        
+        yaw_controller.get().update();
+
+        // LOG_INFO(1, "control");
+        CanFrame::MSGT id_pack;
+        id_pack.data.resize(8);
+        id_pack.id = pitch->get_motor().set_send_buf(pitch_controller.get().out, id_pack.data);
+        if (can_send)
+            pitch->get_motor().get_send_node().send(id_pack);
+        
+        id_pack.data.resize(8);
+        id_pack.id = yaw->get_motor().set_send_buf(yaw_controller.get().out, id_pack.data);
+        if (can_send)
+            yaw->get_motor().get_send_node().send(id_pack);
     }
 
     auto declare_params() -> void {
@@ -141,6 +141,12 @@ public:
         can_send = this->get_parameter("can_send").as_bool();
         pitch_controller.init(*this, concat("pitch"));
         yaw_controller.init(*this, concat("yaw"));
+    }
+
+    ~GimbalNode() {
+        crn.unregister();
+        can0_recv_node.unregister();
+        can1_recv_node.unregister();
     }
 
 private:
