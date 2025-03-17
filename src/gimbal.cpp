@@ -165,6 +165,13 @@ public:
         };
         yaw_kf.get().predict(ObserverYawKf::PredictData{});
         yaw_kf.get().update(update_data);
+
+        using ObserverPitchKf = std::remove_reference_t<decltype(pitch_kf.get())>;
+        ObserverPitchKf::UpdateData update_data2 = {
+            .z = { imu_full_info_msg.pitch_gyro.rad.num},
+        };
+        pitch_kf.get().predict(ObserverPitchKf::PredictData{});
+        pitch_kf.get().update(update_data2);        
     }
 
     auto declare_params() -> void {
@@ -177,11 +184,16 @@ public:
         yaw_kf.get().config.model.A << 1, 0.001, 0, 1;
         yaw_kf.get().config.model.H << 1, 0, 0, 1;
 
+        pitch_kf.init(*this, concat("pitch_kf"));
+        pitch_kf.get().config.model.A << 1;
+        pitch_kf.get().config.model.H << 1;
     }
 
     auto declare_watched_variables() -> void {
         watch_node.add_publisher(yaw_kf.get().get_state().x.at(0), 1, "observer/yaw/euler_rad");
         watch_node.add_publisher(yaw_kf.get().get_state().x.at(1), 1, "observer/yaw/gyro_rad");
+        
+        watch_node.add_publisher(pitch_kf.get().get_state().x.at(0), 1, "observer/pitch/gyro_rad");
     }
 
     ~GimbalNode() {
@@ -219,6 +231,7 @@ private:
     ControllerNode<controller::ControllerType::LQR> yaw_controller;
 
     ObserverNode<ObserverType::KF, StateSpaceModel<2, 0, 2>> yaw_kf;
+    ObserverNode<ObserverType::KF, StateSpaceModel<1, 0, 1>> pitch_kf;
 
     WatchNode watch_node;
 };
