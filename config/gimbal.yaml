@@ -3,9 +3,12 @@
     can_send: true
     pitch:
       kd: 0.0
-      kp: 0.01
+      kp: 0.005
       outmax: 2.0
     yaw:
       kd: 0.0
-      kp: 0.0
+      kp: 0.005
       outmax: 2.0
+    yaw_kf:
+      q_mat: [0.001, 0.000001, 0.000001, 1e-6]
+      r_mat: [0.1, 0.0, 0.0, 0.001]

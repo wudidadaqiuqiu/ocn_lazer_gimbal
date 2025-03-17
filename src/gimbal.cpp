@@ -4,12 +4,16 @@
 #include "common/protocol/serialized_protocol.hpp"
 #include "motor/motor.hpp"
 #include "controller/controller.hpp"
+#include "observer/observer.hpp"
 #include "depend_on_ros12/motor_node/motor_node.hpp"
 #include "depend_on_ros12/attached_node/attached_node.hpp"
+#include "depend_on_ros12/attached_node/watch_node.hpp"
 #include "robot_msg/msg/imu_euler.h"
 #include "robot_msg/msg/imu_euler.hpp"
+#include "robot_msg/msg/imu_full_info.hpp"
 
-using connector_common::concat;
+#include "msg_convert.hpp"
+
 using connector::Connector;
 using connector::ConnectorType;
 using connector::BaudRate;
@@ -19,6 +23,8 @@ using connector::IdPack;
 using connector::TtyFrame;
 using connector::CanFrame;
 
+using connector_common::data_convert;
+using connector_common::concat;
 using connector_common::Unpacker;
 using connector_common::ProtocolConfig;
 using connector_common::CRC16Config;
@@ -29,11 +35,21 @@ using motor_node::MotorType;
 using controller::Controller;
 using controller::ControllerType;
 using attached_node::AttachedNode;
+using attached_node::WatchNode;
 template <ControllerType ControllerTypeT, typename... ControllerArgs>
 using ControllerNode = AttachedNode<Controller<ControllerTypeT>, ControllerArgs...>;
 
+using observer::ObserverType;
+using observer::Observer;
+using observer::StateSpaceModel;
+using observer::KalmanFilter;
+
+template <ObserverType ObserverTypeT, typename... ObserverArgs>
+using ObserverNode = AttachedNode<Observer<ObserverTypeT>, ObserverArgs...>;
+
 
 using robot_msg::msg::ImuEuler;
+using robot_msg::msg::ImuFullInfo;
 
 static constexpr uint8_t PEER_ID = 0x01;
 
@@ -45,13 +61,16 @@ public:
         can0_connector("can0"),
         can1_connector("can1"),
         can0_recv_node(can0_connector),
-        can1_recv_node(can1_connector) {
+        can1_recv_node(can1_connector),
+        watch_node(*this) {
         declare_params();
+        declare_watched_variables();
         pitch = create_6020("pitch", can0_recv_node,1);
         yaw = create_6020("yaw", can1_recv_node, 3);
         connector.con_open("/dev/ttyACM0", BaudRate::BAUD_1M);
         std::cout << "open tty" << std::endl;
         publisher_ = this->create_publisher<ImuEuler>("/imu_euler", 10);
+        publisher_imu_full = this->create_publisher<ImuFullInfo>("/imu_full", 10);
         std::map<uint8_t, std::function<void(uint8_t, const uint8_t*, uint16_t)>> 
             update_func_map;
         std::map<uint8_t, std::function<bool(uint8_t)>> check_id_func_map;
@@ -69,10 +88,13 @@ public:
             imu_msg.yaw = imu_data.yaw;
             imu_msg.pitch_gyro = imu_data.pitch_gyro;
             imu_msg.yaw_gyro = imu_data.yaw_gyro;
+            data_convert(imu_msg, imu_full_info_msg);
 
             control_gimbal(imu_msg);
+            observe_gimbal();
             // 1000Hz
             publisher_->publish(imu_msg);
+            publisher_imu_full->publish(imu_full_info_msg);
         };
         unpacker.change_map(update_func_map, check_id_func_map);
         crn.register_callback([&](const TtyFrame::MSGT& frame) -> void {
@@ -136,11 +158,30 @@ public:
             yaw->get_motor().get_send_node().send(id_pack);
     }
 
+    auto observe_gimbal() -> void {
+        using ObserverYawKf = std::remove_reference_t<decltype(yaw_kf.get())>;
+        ObserverYawKf::UpdateData update_data = {
+            .z = { yaw->get_motor().get_fdb().pos_zero_cross.rad.num, imu_full_info_msg.yaw_gyro.rad.num},
+        };
+        yaw_kf.get().predict(ObserverYawKf::PredictData{});
+        yaw_kf.get().update(update_data);
+    }
+
     auto declare_params() -> void {
         this->declare_parameter("can_send", false);
         can_send = this->get_parameter("can_send").as_bool();
         pitch_controller.init(*this, concat("pitch"));
         yaw_controller.init(*this, concat("yaw"));
+
+        yaw_kf.init(*this, concat("yaw_kf"));
+        yaw_kf.get().config.model.A << 1, 0.001, 0, 1;
+        yaw_kf.get().config.model.H << 1, 0, 0, 1;
+
+    }
+
+    auto declare_watched_variables() -> void {
+        watch_node.add_publisher(yaw_kf.get().get_state().x.at(0), 1, "observer/yaw/euler_rad");
+        watch_node.add_publisher(yaw_kf.get().get_state().x.at(1), 1, "observer/yaw/gyro_rad");
     }
 
     ~GimbalNode() {
@@ -152,12 +193,14 @@ public:
 private:
     robot_msg__msg__ImuEuler imu_data;
     ImuEuler imu_msg;
+    ImuFullInfo imu_full_info_msg;
     Connector<ConnectorType::TTY> connector;
     ConnectorSingleRecvNode<ConnectorType::TTY, TtyFrame> crn;
     ConnectorSendNode<ConnectorType::TTY, TtyFrame> cs;
     Unpacker<ProtocolConfig<CRC16Config<0xFFFF, 0x1021>, 
         protocol_type_e::protocol0>> unpacker;
     rclcpp::Publisher<ImuEuler>::SharedPtr publisher_;
+    rclcpp::Publisher<ImuFullInfo>::SharedPtr publisher_imu_full;
     rclcpp::TimerBase::SharedPtr timer_;
 
     Connector<ConnectorType::CAN> can0_connector;
@@ -174,6 +217,10 @@ private:
     bool can_send;
     ControllerNode<controller::ControllerType::LQR> pitch_controller;
     ControllerNode<controller::ControllerType::LQR> yaw_controller;
+
+    ObserverNode<ObserverType::KF, StateSpaceModel<2, 0, 2>> yaw_kf;
+
+    WatchNode watch_node;
 };
 
 int main(int argc, char **argv) {
