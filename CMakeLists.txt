@@ -13,11 +13,13 @@ endif()
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(robot_msg REQUIRED)
 find_package(embedded_interface REQUIRED)
 
 set(dependencies
   rclcpp
+  geometry_msgs
   robot_msg
   embedded_interface
 )

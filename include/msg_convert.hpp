@@ -17,3 +17,9 @@ inline void connector_common::data_convert
     data_convert(Deg(a.yaw_gyro), b.yaw_gyro);
 }
 
+
+
+template <>
+inline void connector_common::data_convert(const con_used_msg::AngleRelate& a, con_used_msg::AngleRelate& t) {
+    t = a;
+}

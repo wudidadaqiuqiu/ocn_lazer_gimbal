@@ -8,6 +8,7 @@
 #include "depend_on_ros12/motor_node/motor_node.hpp"
 #include "depend_on_ros12/attached_node/attached_node.hpp"
 #include "depend_on_ros12/attached_node/watch_node.hpp"
+#include "geometry_msgs/msg/twist.hpp"
 #include "robot_msg/msg/imu_euler.h"
 #include "robot_msg/msg/imu_euler.hpp"
 #include "robot_msg/msg/imu_full_info.hpp"
@@ -25,6 +26,7 @@ using connector::CanFrame;
 
 using connector_common::data_convert;
 using connector_common::concat;
+using connector_common::Rad;
 using connector_common::Unpacker;
 using connector_common::ProtocolConfig;
 using connector_common::CRC16Config;
@@ -67,10 +69,26 @@ public:
         declare_watched_variables();
         pitch = create_6020("pitch", can0_recv_node,1);
         yaw = create_6020("yaw", can1_recv_node, 3);
+        refsubscription = this->create_subscription<geometry_msgs::msg::Twist>
+            ("gimbal_ref", 10, [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
+            // for (int i = 0; i < 2; i++){
+            //     ref[i] = msg->data[i];
+            // }
+            pitch_ref = msg->angular.y;
+            yaw_ref = msg->angular.z;
+            if (abs(pitch_ref) > 90.0) {
+                pitch_ref = 90.0 * (pitch_ref > 0.0 ? 1.0 : -1.0);
+            }
+            if (abs(yaw_ref) > 90.0) {
+                yaw_ref = 90.0 * (yaw_ref > 0.0 ? 1.0 : -1.0);
+            }
+        });
         connector.con_open("/dev/ttyACM0", BaudRate::BAUD_1M);
         std::cout << "open tty" << std::endl;
         publisher_ = this->create_publisher<ImuEuler>("/imu_euler", 10);
         publisher_imu_full = this->create_publisher<ImuFullInfo>("/imu_full", 10);
+        publisher_control_fdb = this->create_publisher<ImuFullInfo>("/gimbal/control_fdb", 10);
+
         std::map<uint8_t, std::function<void(uint8_t, const uint8_t*, uint16_t)>> 
             update_func_map;
         std::map<uint8_t, std::function<bool(uint8_t)>> check_id_func_map;
@@ -90,11 +108,12 @@ public:
             imu_msg.yaw_gyro = imu_data.yaw_gyro;
             data_convert(imu_msg, imu_full_info_msg);
 
-            control_gimbal(imu_msg);
             observe_gimbal();
+            control_gimbal(control_fdb_msg);
             // 1000Hz
             publisher_->publish(imu_msg);
             publisher_imu_full->publish(imu_full_info_msg);
+            publisher_control_fdb->publish(control_fdb_msg);
         };
         unpacker.change_map(update_func_map, check_id_func_map);
         crn.register_callback([&](const TtyFrame::MSGT& frame) -> void {
@@ -128,16 +147,16 @@ public:
         return mn;
     }
 
-    auto control_gimbal(const ImuEuler& data) -> void {
+    auto control_gimbal(const ImuFullInfo& data) -> void {
         // LOG_INFO(1, "control gimbal");
-        pitch_controller.get().fdb(0) = data.pitch;
-        pitch_controller.get().fdb(1) = data.pitch_gyro;
+        pitch_controller.get().fdb(0) = data.pitch.deg.num;
+        pitch_controller.get().fdb(1) = data.pitch_gyro.deg.num;
 
         pitch_controller.get().ref(0) = pitch_ref;
         pitch_controller.get().ref(1) = 0;
         
-        yaw_controller.get().fdb(0) = data.yaw;
-        yaw_controller.get().fdb(1) = data.yaw_gyro;
+        yaw_controller.get().fdb(0) = data.yaw.deg.num;
+        yaw_controller.get().fdb(1) = data.yaw_gyro.deg.num;
 
         yaw_controller.get().ref(0) = yaw_ref;
         yaw_controller.get().ref(1) = 0;
@@ -171,7 +190,13 @@ public:
             .z = { imu_full_info_msg.pitch_gyro.rad.num},
         };
         pitch_kf.get().predict(ObserverPitchKf::PredictData{});
-        pitch_kf.get().update(update_data2);        
+        pitch_kf.get().update(update_data2); 
+
+
+        data_convert(Rad(yaw_kf.get().get_state().x.at(0)), control_fdb_msg.yaw);
+        data_convert(Rad(yaw_kf.get().get_state().x.at(1)), control_fdb_msg.yaw_gyro);
+        data_convert(Rad(pitch_kf.get().get_state().x.at(0)), control_fdb_msg.pitch_gyro);
+        data_convert(imu_full_info_msg.pitch, control_fdb_msg.pitch);
     }
 
     auto declare_params() -> void {
@@ -206,6 +231,7 @@ private:
     robot_msg__msg__ImuEuler imu_data;
     ImuEuler imu_msg;
     ImuFullInfo imu_full_info_msg;
+    ImuFullInfo control_fdb_msg;
     Connector<ConnectorType::TTY> connector;
     ConnectorSingleRecvNode<ConnectorType::TTY, TtyFrame> crn;
     ConnectorSendNode<ConnectorType::TTY, TtyFrame> cs;
@@ -213,6 +239,8 @@ private:
         protocol_type_e::protocol0>> unpacker;
     rclcpp::Publisher<ImuEuler>::SharedPtr publisher_;
     rclcpp::Publisher<ImuFullInfo>::SharedPtr publisher_imu_full;
+    rclcpp::Publisher<ImuFullInfo>::SharedPtr publisher_control_fdb;
+
     rclcpp::TimerBase::SharedPtr timer_;
 
     Connector<ConnectorType::CAN> can0_connector;
@@ -223,6 +251,8 @@ private:
     
     MotorNode<MotorType::DJI_6020>::SharedPtr pitch;
     MotorNode<MotorType::DJI_6020>::SharedPtr yaw;
+
+    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr refsubscription;
     
     float pitch_ref = 0;
     float yaw_ref = 0;
