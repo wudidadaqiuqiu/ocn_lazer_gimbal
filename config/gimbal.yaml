@@ -2,12 +2,18 @@
   ros__parameters:
     can_send: true
     pitch:
-      kd: 0.0
       kp: 0.005
+      ki: 0.0
+      kd: 0.0
+      error_max: 0.0
+      irange: 5.0
       outmax: 2.0
     yaw:
-      kd: 0.0
       kp: 0.005
+      ki: 0.0
+      kd: 0.0
+      error_max: 0.0
+      irange: 5.0
       outmax: 2.0
     yaw_kf:
       q_mat: [0.001, 0.000001, 0.000001, 1e-6]

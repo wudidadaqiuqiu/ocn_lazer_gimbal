@@ -227,8 +227,8 @@ private:
     float pitch_ref = 0;
     float yaw_ref = 0;
     bool can_send;
-    ControllerNode<controller::ControllerType::LQR> pitch_controller;
-    ControllerNode<controller::ControllerType::LQR> yaw_controller;
+    ControllerNode<controller::ControllerType::LQRI> pitch_controller;
+    ControllerNode<controller::ControllerType::LQRI> yaw_controller;
 
     ObserverNode<ObserverType::KF, StateSpaceModel<2, 0, 2>> yaw_kf;
     ObserverNode<ObserverType::KF, StateSpaceModel<1, 0, 1>> pitch_kf;
