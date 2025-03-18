@@ -61,14 +61,14 @@ public:
         : Node("gimbal"), 
         connector(), crn(connector), cs(connector),
         can0_connector("can0"),
-        can1_connector("can1"),
+        // can1_connector("can1"),
         can0_recv_node(can0_connector),
-        can1_recv_node(can1_connector),
+        // can1_recv_node(can1_connector),
         watch_node(*this) {
         declare_params();
         declare_watched_variables();
         pitch = create_6020("pitch", can0_recv_node,1);
-        yaw = create_6020("yaw", can1_recv_node, 3);
+        yaw = create_6020("yaw", can0_recv_node, 3);
         refsubscription = this->create_subscription<geometry_msgs::msg::Twist>
             ("gimbal_ref", 10, [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
             // for (int i = 0; i < 2; i++){
@@ -104,8 +104,10 @@ public:
             imu_msg.roll = imu_data.roll;
             imu_msg.pitch = imu_data.pitch;
             imu_msg.yaw = imu_data.yaw;
+            imu_msg.roll_gyro = imu_data.roll_gyro;
             imu_msg.pitch_gyro = imu_data.pitch_gyro;
             imu_msg.yaw_gyro = imu_data.yaw_gyro;
+            imu_msg.temperature = imu_data.temperature;
             data_convert(imu_msg, imu_full_info_msg);
 
             observe_gimbal();
@@ -224,7 +226,7 @@ public:
     ~GimbalNode() {
         crn.unregister();
         can0_recv_node.unregister();
-        can1_recv_node.unregister();
+        // can1_recv_node.unregister();
     }
 
 private:
@@ -244,10 +246,10 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
 
     Connector<ConnectorType::CAN> can0_connector;
-    Connector<ConnectorType::CAN> can1_connector;
+    // Connector<ConnectorType::CAN> can1_connector;
     
     ConnectorSingleRecvNode<ConnectorType::CAN, CanFrame> can0_recv_node;
-    ConnectorSingleRecvNode<ConnectorType::CAN, CanFrame> can1_recv_node;
+    // ConnectorSingleRecvNode<ConnectorType::CAN, CanFrame> can1_recv_node;
     
     MotorNode<MotorType::DJI_6020>::SharedPtr pitch;
     MotorNode<MotorType::DJI_6020>::SharedPtr yaw;
